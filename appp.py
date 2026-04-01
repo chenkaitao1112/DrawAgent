@@ -8,21 +8,63 @@ import google.generativeai as genai
 from PIL import Image
 import io
 import re
-
+import config
 from openai import OpenAI
+import streamlit.components.v1 as components
+
 
 # ==========================================
 # 1. 配置与初始化
 # ==========================================
 st.set_page_config(page_title="科研绘图 Agent", layout="wide")
-banana_api_key= 
-gemini_api_key = 
-ONEAPI_BASE_URL = "https://oneapi.gptnb.ai/v1/chat/completions"
+
+
+VALID_INVITE_CODES = config.VALID_INVITE_CODES
 # 侧边栏配置
 with st.sidebar:
-    st.title("⚙️ 设置")
-    model_name = st.selectbox("选择模型", ["gemini-3-pro-preview"])
+    auth_method = st.radio("选择 API 访问方式", ["🔑 使用邀请码 (推荐)", "⚙️ 自定义 API 配置"], horizontal=False)
+
     st.markdown("---")
+
+    # 初始化全局使用的 API 变量，防止未定义报错
+    gemini_api_key = ""
+    gemini_base_url = ""
+    banana_api_key = ""
+    banana_base_url = ""
+
+    # 2. 根据选择渲染不同的输入框
+    if auth_method == "🔑 使用邀请码 (推荐)":
+        invite_code = st.text_input("输入邀请码获取访问权限", type="password", placeholder="请输入邀请码")
+
+        if invite_code:
+            if invite_code in VALID_INVITE_CODES:
+                st.success("✅ 邀请码验证成功！已挂载默认计算资源。")
+                # 赋予默认值
+                gemini_api_key = config.gemini_api_key
+                gemini_base_url = "https://oneapi.gptnb.ai/v1"
+                banana_api_key = config.banana_api_key
+                banana_base_url = "https://oneapi.gptnb.ai/v1/images/generations"
+            else:
+                # 使用 error 框作为“弹窗”提示
+                st.error("❌ 邀请码无效或已过期，请检查！")
+                # 也可以加一个右下角的 toast 提示加强反馈效果
+                st.toast("邀请码错误，请核对后再试", icon="⚠️")
+
+    else:
+        st.caption("🤖 对话大模型配置 (用于逻辑梳理与 Prompt 生成)")
+        gemini_api_key = st.text_input("LLM API Key", type="password", placeholder="sk-...")
+        gemini_base_url = st.text_input("LLM Base URL (可选)", placeholder="例如: https://api.openai.com/v1")
+
+        st.divider()
+
+        st.caption("🎨 视觉模型配置 (用于生成图表)")
+        banana_api_key = st.text_input("Image Gen API Key", type="password", placeholder="sk-...")
+        banana_base_url = st.text_input("Image Gen Base URL (可选)", placeholder="例如: https://api.banana.dev")
+
+    st.markdown("---")
+    model_name = st.selectbox("选择模型",
+                              ["gemini-3-flash-preview", "Doubao-1.5-pro-256k", "gpt-5.1", "deepseek-v3.1", "qwen-plus","gemini-3.1-pro-preview"])
+
     st.info("本应用基于《科研绘图.pdf》构建，实现了 Modality-Aware Agentic Workflow。")
 
 
@@ -80,7 +122,7 @@ def call_llm(prompt,  base_url="https://oneapi.gptnb.ai/v1", model="gemini-3-pro
         return f"错误：调用失败 - {str(e)}"
 
 
-def call_nano_banana(prompt, banana_api_key, model="gemini-3-pro-image-preview", width=1024, height=1024):
+def call_nano_banana(prompt, banana_api_key,banana_url, model="gemini-3-pro-image-preview", width=1024, height=1024):
     """
     调用第三方 oneapi.gptnb.ai 图片生成接口（严格匹配官方文档，兼容原函数入参/返回值）
     :param prompt: 绘图指令（final_prompt_output）
@@ -90,7 +132,7 @@ def call_nano_banana(prompt, banana_api_key, model="gemini-3-pro-image-preview",
     :return: 图片URL（成功）/None + 错误信息（失败）
     """
     # 1. 官方图片生成接口地址
-    url = "https://oneapi.gptnb.ai/v1/images/generations"
+    url = banana_url
 
     # 2. 构造请求头（严格匹配官方 Header 要求）
     headers = {
@@ -118,7 +160,7 @@ def call_nano_banana(prompt, banana_api_key, model="gemini-3-pro-image-preview",
         "prompt": prompt,  # 必需：绘图描述（已截断到1000字符内）
         "n": n,  # 可选：生成数量（默认1）
         "model": model,  # 保留入参的model（兼容原调用逻辑）
-        "size": size_str  # 可选：尺寸（仅用官方支持的值）
+        #"size": size_str  # 可选：尺寸（仅用官方支持的值）
     }
 
     try:
@@ -127,7 +169,7 @@ def call_nano_banana(prompt, banana_api_key, model="gemini-3-pro-image-preview",
             url=url,
             headers=headers,
             json=data,
-            timeout=60
+            timeout=180
         )
         response.raise_for_status()  # 捕获4xx/5xx HTTP错误
 
@@ -235,21 +277,41 @@ Output: {{
 """
 
 
+# def get_style_extraction_prompt(primary_discipline, specialized_field, conference_name):
+#     return f"""
+# #role:你是一位首席信息设计师，正在分析"{primary_discipline}"的"{specialized_field}中关于"{conference_name}"的视觉风格。
+# 你的任务：
+# 搜索该领域下的该会议或期刊（如果没有提供会议期刊则自由选择该领域）的典型科研图
+# 总结一份视觉设计指南，忽略具体的科学算法内容，仅关注美学和平面设计层面的选择。
+# 关键要求： 不要将每个元素收敛到单一固定的设计选择。相反，请识别每个元素存在哪些常见设计选择，以及哪些更流行或更受青睐。
+# 请重点关注以下具体维度：
+# 1. 色彩方案： 观察配色方案、饱和度水平等。注意令人愉悦的色彩组合，并保留多种选项。
+# 2. 线条与箭头： 观察线条粗细、颜色、箭头样式、虚线使用情况。
+# 3. 布局与构图： 观察布局方式、元素排列模式、信息密度、留白使用。
+# 4. 字体与图标： 观察字重、字号、颜色、使用模式以及图标使用方式。
+# 请注意，不同领域的论文可能有不同的美学偏好。例如，智能体（agent）类论文更常使用详细的卡通风格插图，而理论类论文则使用更极简的风格。在总结风格时，请考虑论文的领域。可以使用"对于[领域]，常见选项包括：[列表]"的格式来描述风格。
+# 返回一份简洁的要点式总结，描述这批图表中观察到的视觉风格多样性。
+# #输出限制
+# 仅输出风格内容，不要输出额外的文字
+# """
+
 def get_style_extraction_prompt(primary_discipline, specialized_field, conference_name):
     return f"""
-    你是一位首席信息设计师，正在分析"{primary_discipline}"的"{specialized_field}中关于"{conference_name}"的视觉风格。
+#role:你是一位首席信息设计师，正在分析"{primary_discipline}"的"{specialized_field}"中关于"{conference_name}"的视觉风格。
 你的任务：
-搜索该领域下的该会议或期刊（如果没有提供会议期刊则自由选择该领域）的典型科研图
-总结一份视觉设计指南，忽略具体的科学算法内容，仅关注美学和平面设计层面的选择。
-关键要求： 不要将每个元素收敛到单一固定的设计选择。相反，请识别每个元素存在哪些常见设计选择，以及哪些更流行或更受青睐。
-请重点关注以下具体维度：
-1. 色彩方案： 观察配色方案、饱和度水平等。注意令人愉悦的色彩组合，并保留多种选项。
-2. 形状与容器： 观察形状选择（如圆角矩形 vs 尖角矩形）、容器、边框（粗细、颜色）、背景填充、阴影等。
-3. 线条与箭头： 观察线条粗细、颜色、箭头样式、虚线使用情况。
-4. 布局与构图： 观察布局方式、元素排列模式、信息密度、留白使用。
-5. 字体与图标： 观察字重、字号、颜色、使用模式以及图标使用方式。
-请注意，不同领域的论文可能有不同的美学偏好。例如，智能体（agent）类论文更常使用详细的卡通风格插图，而理论类论文则使用更极简的风格。在总结风格时，请考虑论文的领域。可以使用"对于[领域]，常见选项包括：[列表]"的格式来描述风格。
-返回一份简洁的要点式总结，描述这批图表中观察到的视觉风格多样性。
+搜索该领域顶会或核心期刊的典型科研配图，总结一份视觉设计指南，重点关注该领域“严谨学术图表”的视觉范式。
+
+关键要求：请根据当前学科【{primary_discipline}】的特性，重点观察以下维度的表达习惯：
+1. 核心实体的视觉化：
+   - 若为理工科（如计算机、工程）：观察他们如何用几何图形精确表达系统架构、张量特征、网络模块、硬件拓扑等。
+   - 若为文科/社科/商科：观察他们如何用图形表达理论框架、概念维度、扎根理论模型、结构方程、或者变量间的因果/调节/中介关系。
+2. 关系与流程连接：观察箭头样式、实线/虚线的使用场景（例如：虚线在文科常代表弱相关或调节作用，在理工科常代表控制流或反向传播）。
+3. 布局与构图：观察排布逻辑（如：理工科常见的自底向上/自左向右流水线，文科常见的中心辐射状、矩阵式、或者金字塔层级划分）。
+4. 学术美学约束：强调极致的对齐与排版、清晰的信息层级划分、克制的学术配色（优先使用低饱和度色系、莫兰迪色系，避免过度渲染）。
+
+返回一份简洁的要点式总结，描述这批图表中最符合该学科主流审美的视觉规范。
+#输出限制
+仅输出风格内容，不要输出额外的文字。
 """
 
 def get_text_logic_prompt(text_content):
@@ -261,7 +323,14 @@ def get_text_logic_prompt(text_content):
 {text_content}
 #输出限制 (Constraint)
 1.你只对文本内容做总结和归纳，不得修改论文逻辑和内容
-2.自动识别重点分配详略
+2.自动识别重点分配详略，对于重点部分展示详细技术和细节
+3.请仅输出一个结构化的 Markdown 表格或层级列表，格式如下。禁止输出任何总结性废话或客套话。
+#输出格式示例：
+1. 逻辑流验证 (Logical Flow)
+[Step 1] 输入: ... -> 技术: ... -> 输出: ...
+[Step 2] 输入: ... -> 技术: ... -> 输出: ...
+2. 关键实体提取 (Key Entities)
+- (列出所有需要可视化的具体组件，如：Bi-GRU 模块、求和操作符、残差连线)
 """
 
 def get_code_logic_prompt(code_content):
@@ -274,27 +343,55 @@ def get_code_logic_prompt(code_content):
 {code_content}
 #输出限制 (Constraint)
 1.你只对代码内容做总结和归纳，不得修改论文逻辑和内容
+2.需要展示技术细节和原理
+3.请仅输出一个结构化的 Markdown 表格或层级列表，格式如下。禁止输出任何总结性废话或客套话。
+#输出格式示例：
+1. 逻辑流验证 (Logical Flow)
+[Step 1] 输入: ... -> 技术: ... -> 输出: ...
+[Step 2] 输入: ... -> 技术: ... -> 输出: ...
+2. 关键实体提取 (Key Entities)
+- (列出所有需要可视化的具体组件，如：Bi-GRU 模块、求和操作符、残差连线)
 """
 
 
-def get_visual_spec_prompt(logic_architecture):
+# def get_visual_spec_prompt(logic_architecture):
+#     return f"""
+# #角色：
+# 你现在的任务是“科研绘图视觉定稿师”。根据用户提供的论文内容梳理，生成一份详尽的、无歧义的“视觉元素规格书”，将抽象的技术描述转换为详细生动的视觉元素
+# 输入 ：逻辑架构
+# {logic_architecture}
+# #输出限制：
+# 请仅输出的【视觉元素规格书 (Visual Specification Sheet)】。这是生成最终绘图指令的依据，必须极度具体。
+#
+# 包括：
+# 1. 所有必要模块、组件、输入、输出、流程的列表
+# 2. 视觉层级：主要、次要、辅助元素
+# 3. 组件间的流向与连接关系（数据流、控制流、反馈环）
+# 4. 排版规则：模块名无衬线字体，数学变量衬线斜体
+# 5. 自行选择叙事框架（从左到右、从上到下、S型等）最终结构图
+# 6.不对具体的绘图风格做约束
+# """
+
+def get_visual_spec_prompt(logic_architecture, primary_discipline):
     return f"""
 #角色：
-你现在的任务是“科研绘图视觉定稿师”。根据用户提供的论文内容梳理，生成一份详尽的、无歧义的“视觉元素规格书”，将抽象的技术描述转换为详细生动的视觉元素
+你现在的任务是“科研绘图视觉定稿师”。根据用户提供的逻辑大纲，生成一份详尽的、无歧义的“视觉元素规格书”。
+当前学科领域：【{primary_discipline}】
+
 输入 ：逻辑架构
 {logic_architecture}
-#输出限制：
-请仅输出的【视觉元素规格书 (Visual Specification Sheet)】。这是生成最终绘图指令的依据，必须极度具体。
 
-包括： 
-1. 所有必要模块、组件、输入、输出、流程的列表 
-2. 视觉层级：主要、次要、辅助元素 
-3. 组件间的流向与连接关系（数据流、控制流、反馈环） 
-4. 排版规则：模块名无衬线字体，数学变量衬线斜体 
-5. 使用淡彩分区进行逻辑分组 
-6. 自行选择叙事框架（从左到右、从上到下、S型等）最终结构图
-7.对复杂的抽象概念使用视觉映射/隐喻（Visual Metaphors）
-8.不对具体的绘图风格做约束
+# 核心约束（强制执行）：
+严禁使用任何不恰当的拟人化、自然现象或过度艺术化的概念隐喻（如细胞、云朵、爆炸等）。必须使用【{primary_discipline}】学术界标准的严谨图表语言：
+- 理工类要求：使用标准架构图块（Blocks）、圆柱体（数据库）、多维矩阵块、严密的数据流线等。
+- 文/社科要求：使用规整的概念框（Concept Boxes）、文氏图、多维象限矩阵、层级树状图、因果逻辑箭头等。
+
+#输出限制：
+请仅输出【视觉元素规格书 (Visual Specification Sheet)】，必须极度具体：
+1. 组件清单：所有实体节点及其对应的几何形状约束。
+2. 视觉层级与分组：主概念、次概念、辅助说明，以及如何使用淡彩底色框（Background Panels）进行逻辑分组。
+3. 拓扑与连线：组件间的明确连接关系（实线箭头、虚线关联、双向反馈等）。
+4. 排版规则：清晰的叙事方向（如从左到右、由宏观到微观、环形闭环等），要求极度规整的网格对齐。
 """
 
 def get_final_draw_prompt(logical_context, visual_spec,  style_guideline):
@@ -304,7 +401,10 @@ def get_final_draw_prompt(logical_context, visual_spec,  style_guideline):
 #workflow：
 1.读取用户提供的项目逻辑背景和视觉元素设计
 2.逻辑审计：检查用户输入的步骤是否有断层、维度是否对齐。
-3.视觉元素检查：检查用户视觉元素设计是否合理，是否将抽象技术概念很好的映射为具体元素
+3. 架构与拓扑审查：
+   - 基础底线：严禁出现任何非学术的具象化插画元素（如云朵、树木、细胞等隐喻），必须保持高度抽象和专业的学术克制。
+   - 若为理工科（如计算机、工程、材料等）：严格审查数据流（Data Flow）是否闭环，特征维度在不同模块间是否匹配。所有模块必须抽象为规整的几何节点或标准网络架构表示法（如带维度的立体长方体表示特征图、圆柱体表示数据库等）。
+   - 若为文科/社科/商科（如管理学、社会学、经济学等）：严格审查理论框架的逻辑流（如因果关系、调节/中介效应）是否连贯无误。概念节点必须抽象为规整的几何框（如矩形框代表显变量，椭圆代表潜变量），箭头指向必须符合学术规范（单向因果、双向相关等）。
 4.输出一段符合顶级顶会审美标准的英文 Prompt
 输入数据：
 ##输入 1：项目逻辑
@@ -321,7 +421,7 @@ def get_final_draw_prompt(logical_context, visual_spec,  style_guideline):
 1. 格式克隆：不要使用列表（Bullet points），必须是连贯的长段落英文描述。
 2. 风格锁定：必须包含 "A professional, scientific diagram in the style of a top-tier conference..." 开头。
 3. LaTeX 保留：所有的数学符号（如 $h_t$）必须保留 LaTeX 格式，不要翻译成自然语言。
-4. 分块描述：使用 "Section 1 (Left):...", "Section 2 (Middle):..." 这样的结构来引导布局。每个分块用虚线框包围。项目完整背景中每个step就是一个模块一个Section
+4. 分块描述：使用 "Section 1 (Left):...", "Section 2 (Middle):..." 这样的结构来引导布局。
 5. 零废话：直接输出那段英文 Prompt，不要输出任何解释、不要输出中文、不要输出 "Here is your prompt"。
 6. 必须包含以下限制
   1. 文字可读性：确保文字占位符具有高对比度。即使文字内容是占位符（无意义字符），其位置安排也必须符合逻辑。
@@ -459,7 +559,8 @@ with col_left:
             try:
                 # --- Step 1: Router (智能路由) ---
                 status_container.write("🔄 Step 1: 识别领域与类型...")
-                router_res = call_llm(get_ROUTER_PROMPT(user_input))
+                router_res = call_llm(get_ROUTER_PROMPT(user_input),base_url = gemini_base_url,model = model_name)
+                print(router_res)
                 logs.append(f"**Router Output:**\n{router_res}")
 
                 # 解析 JSON
@@ -474,7 +575,7 @@ with col_left:
 
                 # --- Step 2: Style Extraction (风格提取) ---
                 status_container.write(f"🎨 Step 2: 提取 {target_conf} 视觉风格...")
-                style_res = call_llm(get_style_extraction_prompt(p_disc, s_field, target_conf))
+                style_res = call_llm(get_style_extraction_prompt(p_disc, s_field, target_conf),base_url = gemini_base_url,model = model_name)
                 logs.append(f"**Style Guide:**\n{style_res}")
 
                 # --- Step 3: Logic Extraction (逻辑梳理) ---
@@ -483,47 +584,51 @@ with col_left:
                     logic_prompt = get_code_logic_prompt(user_input)
                 else:
                     logic_prompt = get_text_logic_prompt(user_input)
-                logic_res = call_llm(logic_prompt)
+                logic_res = call_llm(logic_prompt,base_url = gemini_base_url,model = model_name)
                 logs.append(f"**Logic Structure:**\n{logic_res}")
 
                 # --- Step 4: Visual Specs (视觉规格) ---
                 status_container.write("📐 Step 4: 生成视觉规格书...")
-                visual_res = call_llm(get_visual_spec_prompt(logic_res))
+                visual_res = call_llm(get_visual_spec_prompt(logic_res,p_disc),base_url = gemini_base_url,model = model_name)
                 logs.append(f"**Visual Specs:**\n{visual_res}")
 
                 # --- Step 5: Final Prompt (生成绘图指令) ---
                 status_container.write("✍️ Step 5: 编写最终绘图 Prompt...")
                 final_draw_instruction = get_final_draw_prompt(logic_res, visual_res, style_res)
-                final_prompt = call_llm(final_draw_instruction)
+                final_prompt = call_llm(final_draw_instruction,base_url = gemini_base_url,model = model_name)
                 logs.append(f"**Final Prompt:**\n{final_prompt}")
 
                 st.session_state["result_storage"]["final_prompt"] = final_prompt
 
                 # --- Step 6: Image Generation (调用生图) ---
                 status_container.write("🖼️ Step 6: AI 正在绘图 (Nano banana)...")
-                image_url, img_err = call_nano_banana(final_prompt, banana_api_key)
+                image_url, img_err = call_nano_banana(final_prompt, banana_api_key, banana_url=banana_base_url)
+                print(image_url, img_err)
 
                 if img_err:
                     st.error(f"绘图失败: {img_err}")
+                    st.session_state["result_storage"]["logs"] = logs
+                    status_container.update(label="❌ 绘图失败，流程中断", state="error", expanded=True)
                 else:
                     st.session_state["result_storage"]["image_url"] = image_url
 
-                    # --- Step 7: XML Reverse Engineering (逆向工程) ---
-                    status_container.write("🧱 Step 7: 正在逆向生成 Draw.io XML...")
-                    xml_code, xml_err = generate_xml_from_image_real(image_url, model)
+                    # # --- Step 7: XML Reverse Engineering (逆向工程) ---
+                    # status_container.write("🧱 Step 7: 正在逆向生成 Draw.io XML...")
+                    # xml_code, xml_err = generate_xml_from_image_real(image_url, model)
+                    #
+                    # if xml_code:
+                    #     # 清洗 Markdown 标记
+                    #     clean_xml = re.sub(r"```xml|```", "", xml_code).strip()
+                    #     st.session_state["result_storage"]["xml_code"] = clean_xml
+                    # else:
+                    #     st.warning(f"XML 生成异常: {xml_err}")
+                    st.session_state["result_storage"]["logs"] = logs
+                    status_container.update(label="✅ 全流程执行完毕", state="complete", expanded=False)
 
-                    if xml_code:
-                        # 清洗 Markdown 标记
-                        clean_xml = re.sub(r"```xml|```", "", xml_code).strip()
-                        st.session_state["result_storage"]["xml_code"] = clean_xml
-                    else:
-                        st.warning(f"XML 生成异常: {xml_err}")
+                    # 强制刷新以显示结果
+                    st.rerun()
 
-                st.session_state["result_storage"]["logs"] = logs
-                status_container.update(label="✅ 全流程执行完毕", state="complete", expanded=False)
 
-                # 强制刷新以显示结果
-                st.rerun()
 
             except Exception as e:
                 st.error(f"工作流出错: {str(e)}")
@@ -541,10 +646,10 @@ with col_right:
                 st.markdown(log)
                 st.divider()
 
-    if res["xml_code"]:
-        st.subheader("2. Draw.io XML 代码")
-        st.info("复制 -> 打开 draw.io -> Extras -> Edit Diagram -> 粘贴")
-        st.code(res["xml_code"], language="xml")
+    # if res["xml_code"]:
+    #     st.subheader("2. Draw.io XML 代码")
+    #     st.info("复制 -> 打开 draw.io -> Extras -> Edit Diagram -> 粘贴")
+    #     st.code(res["xml_code"], language="xml")
 
     elif not res["image_url"]:
         st.info("👈 等待输入并启动...")
@@ -556,5 +661,4 @@ with col_right:
         4. Visual Spec (视觉映射)
         5. Final Prompt (指令生成)
         6. Image Gen (绘图)
-        7. Vision to XML (逆向代码)
         """)
