@@ -1,0 +1,11 @@
+{
+  "key": "summarizer",
+  "value": {
+    "english_prompt": "",
+    "chinese_explanation": "",
+    "image_constraints": [],
+    "legend_required": false,
+    "checkpoint_ready": true
+  }
+}
+
