@@ -1,0 +1,25 @@
+agents:
+  controller:
+    file: ./prompts/agents/controller.md
+    description: Main controller agent that selects skill, asks clarification, dispatches virtual tasks, and decides whether to retry or proceed.
+  logic_extraction:
+    file: ./prompts/agents/logic_extraction.md
+    description: Virtual worker prompt for extracting scientific logic topology.
+  style_extraction:
+    file: ./prompts/agents/style_extraction.md
+    description: Virtual worker prompt for extracting publication style constraints.
+  visual_mapping:
+    file: ./prompts/agents/visual_mapping.md
+    description: Virtual worker prompt for mapping logic and style into layout.
+  summarization:
+    file: ./prompts/agents/summarization.md
+    description: Virtual worker prompt for generating final English image prompt.
+  prompt_reviser:
+    file: ./prompts/agents/prompt_reviser.md
+    description: Rewrite the current reviewed image prompt according to a scoped user follow-up without rerunning unrelated stages.
+  generic_virtual_agent:
+    file: ./prompts/agents/generic_virtual_agent.md
+    description: Generic virtual worker prompt for skill-defined stages.
+  reviewer:
+    file: ./prompts/agents/reviewer.md
+    description: Review prompt used by the MCP review server.

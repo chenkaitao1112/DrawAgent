@@ -1,0 +1,35 @@
+app:
+  name: drawAgent-v2
+  locale: zh-CN
+  timezone: Asia/Shanghai
+
+runtime:
+  max_review_rounds: 3
+  max_concurrent_virtual_tasks: 2
+  max_review_failure_policy: release_with_warning
+  frontend_confirm_before_image_generation: true
+  mode: prompt_then_confirm_then_generate
+
+skills:
+  default_skill: scientific_diagram
+
+llm:
+  controller_model_env: CONTROLLER_MODEL
+  worker_model_env: WORKER_MODEL
+  review_model_env: REVIEW_MODEL
+  api_mode_env: LLM_API_MODE
+  base_url_env: LLM_BASE_URL
+  api_key_env: LLM_API_KEY
+
+image:
+  model_env: IMAGE_MODEL
+  api_mode_env: IMAGE_API_MODE
+  base_url_env: IMAGE_BASE_URL
+  api_key_env: IMAGE_API_KEY
+
+mcp:
+  review:
+    timeout_seconds_env: REVIEW_MCP_TIMEOUT_SECONDS
+    command_env: REVIEW_MCP_COMMAND
+    args_env: REVIEW_MCP_ARGS
+    default_module: mcp_servers.drawagent_mcp_server

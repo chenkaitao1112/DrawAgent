@@ -1,0 +1,143 @@
+agents:
+  logic_extractor:
+    aliases:
+      - logic_extraction
+    description: Extract scientific method logic from source documents.
+    prompt_name: logic_extraction
+    output_contract: logic_artifact
+    default_role: logic
+    model_role: logic_extraction
+    temperature: 0.1
+    max_tokens: 1600
+    review_phase: logic_review
+    allowed_input_refs:
+      - document.full_text
+      - document.excerpt
+      - user.input
+
+  style_extractor:
+    aliases:
+      - style_extraction
+    description: Extract publication and user preference constraints for figure style.
+    prompt_name: style_extraction
+    output_contract: style_artifact
+    default_role: style
+    model_role: style_extraction
+    temperature: 0.2
+    max_tokens: 1400
+    review_phase: style_review
+    allowed_input_refs:
+      - user.primary_discipline
+      - user.conference_name
+      - user.preferences
+      - user.input
+
+  visual_mapper:
+    aliases:
+      - visual_mapping
+    description: Map upstream logic and style artifacts into a visual layout plan.
+    prompt_name: visual_mapping
+    output_contract: layout_artifact
+    default_role: visual_mapping
+    model_role: visual_mapping
+    temperature: 0.2
+    max_tokens: 2200
+    review_phase: visual_review
+    artifact_channels:
+      - payload_logic
+      - payload_style
+    artifact_channel_sources:
+      payload_logic:
+        stage: logic_extraction
+        alias: payload_logic
+      payload_style:
+        stage: style_extraction
+        alias: payload_style
+    dedupe_artifact_inputs: true
+    allowed_input_refs:
+      - artifacts.stage_outputs.logic_extraction
+      - artifacts.stage_outputs.style_extraction
+      - artifacts.payload_logic
+      - artifacts.payload_style
+      - user.input
+
+  prompt_summarizer:
+    aliases:
+      - summarization
+    description: Summarize upstream artifacts into a final English drawing prompt.
+    prompt_name: summarization
+    output_contract: final_prompt_artifact
+    default_role: final_prompt
+    model_role: summarization
+    temperature: 0.2
+    max_tokens: 1800
+    review_phase: final_prompt_review
+    artifact_channels:
+      - payload_logic
+      - payload_style
+      - payload_mapper
+    artifact_channel_sources:
+      payload_logic:
+        stage: logic_extraction
+        alias: payload_logic
+      payload_style:
+        stage: style_extraction
+        alias: payload_style
+      payload_mapper:
+        stage: visual_mapping
+        alias: payload_mapper
+    dedupe_artifact_inputs: true
+    allowed_input_refs:
+      - artifacts.stage_outputs.logic_extraction
+      - artifacts.stage_outputs.style_extraction
+      - artifacts.stage_outputs.visual_mapping
+      - artifacts.payload_logic
+      - artifacts.payload_style
+      - artifacts.payload_mapper
+      - user.input
+
+  prompt_reviser:
+    aliases:
+      - prompt_revision
+    description: Revise an existing reviewed drawing prompt using a scoped user follow-up.
+    prompt_name: prompt_reviser
+    output_contract: final_prompt_artifact
+    default_role: prompt_revision
+    model_role: prompt_revision
+    temperature: 0.2
+    max_tokens: 2200
+    review_phase: prompt_revision_review
+    allowed_input_refs:
+      - artifacts.payload_final
+      - artifacts.payload_logic
+      - artifacts.payload_style
+      - artifacts.payload_mapper
+      - user.input
+
+  generic_worker:
+    aliases:
+      - generic
+    description: Generic skill-defined worker for stages without a specialized profile.
+    prompt_name: generic_virtual_agent
+    output_contract: text_artifact
+    default_role: generic
+    model_role: worker_default
+    temperature: 0.2
+    max_tokens: 1800
+    review_phase: generic_review
+    allowed_input_refs:
+      - "*"
+
+  image_generator:
+    aliases:
+      - image_generation
+    description: Generate an image after the user confirms the final prompt.
+    prompt_name: image_generation
+    output_contract: image_artifact
+    default_role: image
+    model_role: image_generation
+    temperature: 0.0
+    max_tokens: 0
+    review_phase: ""
+    allowed_input_refs:
+      - artifacts.payload_final
